@@ -31,23 +31,43 @@ if [ -z "$ARCH" ]; then
   exit 1
 fi
 
-# Platform mappings from working repos
-declare -A ARCH_FLAGS
-ARCH_FLAGS=(
+# Platform mappings for Docker
+declare -A PLATFORM_MAP
+PLATFORM_MAP=(
   ["armv6"]="linux/arm/v7"
   ["armhf"]="linux/arm/v7"
   ["arm64"]="linux/arm64"
   ["amd64"]="linux/amd64"
 )
 
+# Compiler triplet mappings for explicit cross-compilation specification
+declare -A COMPILER_TRIPLET
+COMPILER_TRIPLET=(
+  ["armv6"]="arm-linux-gnueabihf"
+  ["armhf"]="arm-linux-gnueabihf"
+  ["arm64"]="aarch64-linux-gnu"
+  ["amd64"]="x86_64-linux-gnu"
+)
+
+# CMake system processor mappings
+declare -A CMAKE_PROCESSOR
+CMAKE_PROCESSOR=(
+  ["armv6"]="armv6"
+  ["armhf"]="armv7"
+  ["arm64"]="aarch64"
+  ["amd64"]="x86_64"
+)
+
 # Validate architecture
-if [[ -z "${ARCH_FLAGS[$ARCH]}" ]]; then
+if [[ -z "${PLATFORM_MAP[$ARCH]}" ]]; then
   echo "Error: Unknown architecture: $ARCH"
   echo "Supported: armv6, armhf, arm64, amd64"
   exit 1
 fi
 
-PLATFORM="${ARCH_FLAGS[$ARCH]}"
+PLATFORM="${PLATFORM_MAP[$ARCH]}"
+TRIPLET="${COMPILER_TRIPLET[$ARCH]}"
+PROCESSOR="${CMAKE_PROCESSOR[$ARCH]}"
 DOCKERFILE="docker/Dockerfile.dab.$ARCH"
 IMAGE_NAME="volumio-dab-builder:$ARCH"
 OUTPUT_DIR="out/$ARCH"
@@ -83,21 +103,27 @@ mkdir -p "$OUTPUT_DIR"
 echo "[+] Running build in container..."
 if [[ "$ARCH" == "armv6" ]]; then
   docker run --rm --platform=$PLATFORM \
-    -v "$(pwd)/source:/build/source:ro" \
+    -e CMAKE_TRIPLET="$TRIPLET" \
+    -e CMAKE_PROCESSOR="$PROCESSOR" \
+    -v "$(pwd)/source:/build/source" \
     -v "$(pwd)/scripts:/build/scripts:ro" \
     -v "$(pwd)/$OUTPUT_DIR:/build/output" \
     "$IMAGE_NAME" \
     bash -c '\
       export CXXFLAGS="-O2 -march=armv6 -mfpu=vfp -mfloat-abi=hard -marm -std=c++11" && \
+      export CFLAGS="$CXXFLAGS" && \
       bash /build/scripts/build-binaries.sh armv6'
 else
   docker run --rm --platform=$PLATFORM \
-    -v "$(pwd)/source:/build/source:ro" \
+    -e CMAKE_TRIPLET="$TRIPLET" \
+    -e CMAKE_PROCESSOR="$PROCESSOR" \
+    -v "$(pwd)/source:/build/source" \
     -v "$(pwd)/scripts:/build/scripts:ro" \
     -v "$(pwd)/$OUTPUT_DIR:/build/output" \
     "$IMAGE_NAME" \
     bash -c '\
       export CXXFLAGS="-O2 -std=c++11" && \
+      export CFLAGS="$CXXFLAGS" && \
       bash /build/scripts/build-binaries.sh '"$ARCH"
 fi
 

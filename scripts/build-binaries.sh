@@ -25,18 +25,36 @@ if [ ! -d "$SOURCE_DIR" ]; then
   exit 1
 fi
 
-# Patch upstream source to remove ASan (run once)
+# Patch upstream source (run once)
 echo "[+] Patching upstream source..."
 PATCH_MARKER="$SOURCE_DIR/.volumio_patched"
 if [ ! -f "$PATCH_MARKER" ]; then
-  # Remove -fsanitize=address
+  # Remove -fsanitize=address and debug flags
   sed -i 's/-fsanitize=address//g' "$SOURCE_DIR/example-3/CMakeLists.txt"
   sed -i 's/ -g / /g' "$SOURCE_DIR/example-3/CMakeLists.txt"
   sed -i 's/-fsanitize=address//g' "$SOURCE_DIR/dab-scanner/CMakeLists.txt"
   sed -i 's/ -g / /g' "$SOURCE_DIR/dab-scanner/CMakeLists.txt"
-  
+
+  # CRITICAL FIX: Redirect all stdout debug output to stderr
+  # This prevents debug messages from corrupting the PCM audio stream on stdout
+  echo "    Redirecting debug output from stdout to stderr..."
+
+  # Find and patch ALL C/C++ source files
+  find "$SOURCE_DIR" \( -name "*.cpp" -o -name "*.c" \) -type f | while read -r file; do
+    # Replace fprintf(stdout, with fprintf(stderr,
+    sed -i 's/fprintf[[:space:]]*([[:space:]]*stdout[[:space:]]*,/fprintf(stderr,/g' "$file"
+    # Replace standalone printf( with fprintf(stderr,
+    sed -i '/fprintf/!s/printf[[:space:]]*(/fprintf(stderr, /g' "$file"
+  done
+
+  # Fix DEBUG_PRINT macros in device-handler.h files
+  find "$SOURCE_DIR" -name "device-handler.h" -type f | while read -r file; do
+    sed -i 's/printf(__VA_ARGS__);/fprintf(stderr, __VA_ARGS__);/g' "$file"
+  done
+
+  echo "    Patched $(find "$SOURCE_DIR" \( -name "*.cpp" -o -name "*.c" \) -type f | wc -l) source files"
   touch "$PATCH_MARKER"
-  echo "    Source patched to remove ASan flags"
+  echo "    Source patched: ASan removed, debug output redirected to stderr"
 else
   echo "    Source already patched"
 fi
